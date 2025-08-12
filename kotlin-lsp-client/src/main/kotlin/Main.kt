@@ -88,19 +88,20 @@ fun main() {
         val initResult = server.initialize(initParams).get(60, TimeUnit.SECONDS)
         println("[INFO] Server initialized with capabilities: ${initResult.capabilities}")
 
-        return
 
         // Notify that initialization is complete
+        println("[INFO] Sending initialized notification...")
         server.initialized(InitializedParams())
-        
+
+
         // Create the basic-project directory and a sample Kotlin file
-        try {
-            setupTestProject()
-        }catch(e: Exception) {
-            println("[ERROR] Error setting up test project: ${e.message}")
-            e.printStackTrace()
-            return
-        }
+//        try {
+//            setupTestProject()
+//        }catch(e: Exception) {
+//            println("[ERROR] Error setting up test project: ${e.message}")
+//            e.printStackTrace()
+//            return
+//        }
         
         // Test autocompletion
 //        testAutocompletion(server)
