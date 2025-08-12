@@ -1,14 +1,64 @@
 package org.example
 
+import com.google.gson.GsonBuilder
+import com.google.gson.JsonParser
+import com.google.gson.JsonSyntaxException
 import org.eclipse.lsp4j.*
 import org.eclipse.lsp4j.launch.LSPLauncher
 import org.eclipse.lsp4j.services.LanguageClient
 import org.eclipse.lsp4j.services.LanguageServer
 import java.io.File
+import java.io.PrintWriter
+import java.io.Writer
 import java.net.Socket
 import java.nio.file.Paths
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
+
+/**
+ * Custom PrintWriter for logging LSP messages.
+ * Formats and displays the content of all sent and received messages.
+ * Properly formats JSON content to make it more readable.
+ */
+class LoggingPrintWriter(writer: Writer) : PrintWriter(writer, true) {
+    private val dateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS")
+    private val gson = GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create()
+
+    override fun println(message: String) {
+        val timestamp = LocalDateTime.now().format(dateTimeFormatter)
+        val formattedContent = formatJsonIfPossible(message)
+        val formattedMessage = "[$timestamp] LSP Message: $formattedContent"
+        super.println(formattedMessage)
+        super.flush()
+    }
+
+    override fun println(obj: Any?) {
+        println(obj.toString())
+    }
+
+    /**
+     * Attempts to format the message as JSON if it appears to be JSON content.
+     * If the message is not valid JSON or doesn't look like JSON, returns the original message.
+     */
+    private fun formatJsonIfPossible(message: String): String {
+        val trimmed = message.trim()
+        if ((trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+            (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+            try {
+                // Parse the JSON string to a JsonElement
+                val jsonElement = JsonParser.parseString(trimmed)
+                // Convert back to a properly formatted JSON string
+                return gson.toJson(jsonElement)
+            } catch (_: JsonSyntaxException) {
+                // If parsing fails, return the original message
+                return message
+            }
+        }
+        return message
+    }
+}
 
 /**
  * A simple LSP client for testing Kotlin LSP autocompletion feature.
@@ -16,44 +66,48 @@ import java.util.concurrent.TimeUnit
  */
 class KotlinLspClient : LanguageClient {
     override fun telemetryEvent(obj: Any?) {
-        println("[DEBUG] Telemetry event: $obj")
+        println("[SERVER LOG] Telemetry event: $obj")
     }
 
     override fun publishDiagnostics(diagnostics: PublishDiagnosticsParams?) {
-        println("[DEBUG] Received diagnostics: $diagnostics")
+        println("[SERVER LOG] Received diagnostics: $diagnostics")
     }
 
     override fun showMessage(messageParams: MessageParams?) {
-        println("[INFO] Server message: ${messageParams?.message}")
+        println("[SERVER LOG] Server message: ${messageParams?.message}")
     }
 
     override fun showMessageRequest(requestParams: ShowMessageRequestParams?): CompletableFuture<MessageActionItem> {
-        println("[INFO] Server message request: ${requestParams?.message}")
+        println("[SERVER LOG] Server message request: ${requestParams?.message}")
         return CompletableFuture.completedFuture(null)
     }
 
     override fun logMessage(message: MessageParams?) {
-        println("[DEBUG] Server log: ${message?.message}")
+        println("[SERVER LOG] Server log: ${message?.message}")
     }
 }
 
 fun main() {
     println("[INFO] Starting Kotlin LSP client...")
-    
+
     try {
         // Connect to the Kotlin LSP server running on localhost:9999
         val socket = Socket("localhost", 9999)
         println("[INFO] Connected to Kotlin LSP server at localhost:9999")
-        
+
         // Create the client instance
         val client = KotlinLspClient()
-        
+
         // Create the launcher with message tracing enabled
+        val messageLogger = LoggingPrintWriter(System.out.writer())
+        println("[INFO] Message tracing enabled - all sent and received messages will be displayed")
+
         val launcher = LSPLauncher.Builder<LanguageServer>()
             .setLocalService(client)
             .setRemoteInterface(LanguageServer::class.java)
             .setInput(socket.getInputStream())
             .setOutput(socket.getOutputStream())
+            .traceMessages(messageLogger)
             .create()
 
         // Start listening for incoming messages
@@ -65,8 +119,8 @@ fun main() {
         // Initialize the server
         val initParams = InitializeParams()
         initParams.processId = ProcessHandle.current().pid().toInt()
-        val currentpath = System.getProperty("user.dir")
-        initParams.workspaceFolders = listOf(WorkspaceFolder(Paths.get(currentpath).parent.resolve("basic-project").toUri().toString(), "basic kotlin project"))
+        val currentPath = System.getProperty("user.dir")
+        initParams.workspaceFolders = listOf(WorkspaceFolder(Paths.get(currentPath).parent.resolve("basic-project").toUri().toString(), "basic kotlin project"))
         
         // Set capabilities
         val capabilities = ClientCapabilities()
@@ -93,18 +147,9 @@ fun main() {
         println("[INFO] Sending initialized notification...")
         server.initialized(InitializedParams())
 
-
-        // Create the basic-project directory and a sample Kotlin file
-//        try {
-//            setupTestProject()
-//        }catch(e: Exception) {
-//            println("[ERROR] Error setting up test project: ${e.message}")
-//            e.printStackTrace()
-//            return
-//        }
         
         // Test autocompletion
-//        testAutocompletion(server)
+        testAutocompletion(server)
         
         // Shutdown the server
         println("[INFO] Shutting down server...")
@@ -122,62 +167,53 @@ fun main() {
 }
 
 /**
- * Sets up a basic test project structure
- */
-fun setupTestProject() {
-    println("[INFO] Setting up test project...")
-    
-    val projectDir = File("../basic-project")
-    if (!projectDir.exists()) {
-        println("[ERROR] Test project directory ../basic-project does not exist.")
-        throw RuntimeException("Test project directory does not exist.")
-    }
-    
-    val srcDir = File(projectDir, "src")
-    if (!srcDir.exists()) {
-        println("[ERROR] Test project source directory src does not exist.")
-        throw RuntimeException("Test project source directory does not exist.")
-    }
-    
-    val testFile = File(srcDir, "Test.kt")
-    if (!testFile.exists()) {
-        println("[ERROR] Test project source file Test.kt does not exist.")
-        throw RuntimeException("Test project source file does not exist.")
-    }
-}
-
-/**
  * Tests autocompletion functionality
  */
 fun testAutocompletion(server: LanguageServer) {
     println("[INFO] Testing autocompletion...")
-    
+    val uri = Paths.get(System.getProperty("user.dir")).parent.resolve("basic-project/src/main/kotlin/Main.kt").toUri().toString()
+    val text = File("../basic-project/src/main/kotlin/Main.kt").readText()
+
+    // Send didOpen notification
+    val didOpenParams = DidOpenTextDocumentParams(
+        TextDocumentItem(
+            uri,
+            "kotlin",
+            1,
+            text
+        )
+    )
+
+    println("[INFO] Sending didOpen notification...")
+    server.textDocumentService.didOpen(didOpenParams)
+
     // Create a completion request
     val completionParams = CompletionParams()
     completionParams.textDocument = TextDocumentIdentifier(
-        Paths.get("basic-project/src/Test.kt").toUri().toString()
+        uri
     )
-    
-    // Position after "test." in the file
-    completionParams.position = Position(2, 9)
-    
+
+    // Position after "printl" in the file
+    completionParams.position = Position(6, 10)
+
     try {
         // Send completion request
-        println("[INFO] Sending completion request for position (2,9)...")
+        println("[INFO] Sending completion request for position (6,10)...")
         val completionResult = server.textDocumentService.completion(completionParams).get(5, TimeUnit.SECONDS)
-        
+
         // Handle the Either<List<CompletionItem>, CompletionList> result
         val items = when {
             completionResult.isLeft -> completionResult.left
             completionResult.isRight -> completionResult.right.items
             else -> emptyList()
         }
-        
+
         // Display results
         println("[INFO] Received ${items.size} completion items:")
         items.forEachIndexed { index: Int, item: CompletionItem ->
-            println("[INFO] ${index + 1}. ${item.label ?: "No label"} - ${item.detail ?: "No detail"}")
+            println("${index + 1}. ${item.label ?: "No label"} - ${item.detail ?: "No detail"}")
         }
+        println()
     } catch (e: Exception) {
         println("[ERROR] Error getting completions: ${e.message}")
         e.printStackTrace()
