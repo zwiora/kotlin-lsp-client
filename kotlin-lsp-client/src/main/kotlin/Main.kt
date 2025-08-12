@@ -187,6 +187,22 @@ fun testAutocompletion(server: LanguageServer) {
     println("[INFO] Sending didOpen notification...")
     server.textDocumentService.didOpen(didOpenParams)
 
+
+    // Send didChange notification
+    val didChangeParams = DidChangeTextDocumentParams(
+        VersionedTextDocumentIdentifier(uri, 2),
+        listOf(
+            TextDocumentContentChangeEvent(
+                Range(
+                    Position(6, 0),
+                    Position(6, text.lines()[6].length)
+                ),
+                "printl"
+            )
+        )
+    )
+    server.textDocumentService.didChange(didChangeParams)
+
     // Create a completion request
     val completionParams = CompletionParams()
     completionParams.textDocument = TextDocumentIdentifier(
@@ -211,11 +227,25 @@ fun testAutocompletion(server: LanguageServer) {
         // Display results
         println("[INFO] Received ${items.size} completion items:")
         items.forEachIndexed { index: Int, item: CompletionItem ->
-            println("${index + 1}. ${item.label ?: "No label"} - ${item.detail ?: "No detail"}")
+            println("${index + 1}. ${item.label ?: "No label"} - ${item.documentation ?: "No detail"}")
         }
         println()
+
+        // Resolve the first completion item
+        if (items.isNotEmpty()) {
+            println("[INFO] Resolving first completion item: ${items[0].label}")
+            val resolvedItem = server.textDocumentService.resolveCompletionItem(items[0]).get(5, TimeUnit.SECONDS)
+            println("[INFO] Resolved item details:")
+            println("Label: ${resolvedItem.label}")
+            println("Detail: ${resolvedItem.detail}")
+            println("Documentation: ${resolvedItem.documentation}")
+            println("Additional data: ${resolvedItem.data}")
+        }
+
     } catch (e: Exception) {
         println("[ERROR] Error getting completions: ${e.message}")
         e.printStackTrace()
     }
+
+    server.textDocumentService.didClose(DidCloseTextDocumentParams(TextDocumentIdentifier(uri)))
 }
