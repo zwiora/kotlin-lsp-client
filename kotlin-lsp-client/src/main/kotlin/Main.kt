@@ -10,11 +10,16 @@ import java.util.concurrent.TimeUnit
 
 
 fun main() {
-    println("[INFO] Starting Kotlin LSP client...\n")
+    // Parameters for running the client
     val port = 9999
-    val uri = Paths.get(System.getProperty("user.dir")).parent.resolve("basic-project/src/main/kotlin/Main.kt").toUri()
+    val testProjectPath = Paths.get(System.getProperty("user.dir")).parent.resolve("basic-project")
+    val testFile = "src/main/kotlin/Main.kt"
+    val testFileFull = "../basic-project/$testFile"
+
+    println("[INFO] Starting Kotlin LSP client...\n")
+    val uri = testProjectPath.resolve(testFile).toUri()
         .toString()
-    val text = File("../basic-project/src/main/kotlin/Main.kt").readText()
+    val text = File(testFileFull).readText()
 
     try {
         // Connect to the Kotlin LSP server
@@ -22,7 +27,7 @@ fun main() {
         val server = connectToLSPServer(port) ?: throw RuntimeException("Failed to connect to Kotlin LSP server")
 
         println("[INFO] Sending initialize request...")
-        server.initialize(generateInitParams()).get(30, TimeUnit.SECONDS)
+        server.initialize(generateInitParams(testProjectPath.toUri().toString())).get(30, TimeUnit.SECONDS)
 
         println("[INFO] Sending initialized notification...")
         server.initialized(InitializedParams())
@@ -132,13 +137,12 @@ private fun generateDidOpenParams(uri : String, text :String): DidOpenTextDocume
     return didOpenParams
 }
 
-private fun generateInitParams(): InitializeParams {
+private fun generateInitParams(uri: String): InitializeParams {
     val initParams = InitializeParams()
     initParams.processId = ProcessHandle.current().pid().toInt()
-    val currentPath = System.getProperty("user.dir")
     initParams.workspaceFolders = listOf(
         WorkspaceFolder(
-            Paths.get(currentPath).parent.resolve("basic-project").toUri().toString(),
+            uri,
             "basic kotlin project"
         )
     )
